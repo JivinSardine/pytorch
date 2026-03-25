@@ -302,6 +302,23 @@ Unsupported Tensor.item() call with capture_scalar_outputs=False
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
         )
 
+    def test_reorder_print_data_dependent_fstring(self):
+        """Print with data-dependent bool in f-string should graph break on print."""
+
+        def f(x, mask):
+            make_causal = bool((mask == 0).all())
+            print(f"make_causal={make_causal}")
+            return make_causal + x + 1
+
+        x = torch.randn(2, 3)
+        mask = torch.zeros(2, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace builtin operator `print`",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(x, mask)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
