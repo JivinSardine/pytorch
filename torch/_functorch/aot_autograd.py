@@ -27,7 +27,6 @@ from torch._dynamo.utils import (
 from torch._functorch._aot_autograd.autograd_cache import create_fx_config
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
-from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -924,7 +923,6 @@ def prepare_aot_module_simplified(
     kwargs: dict[str, Any] | None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     keep_inference_input_mutations: bool,
-    boxed_forward_device_index: BoxedDeviceIndex | None,
     ignore_shape_env: bool,
     flatten: bool,
     *,
@@ -1119,7 +1117,6 @@ def aot_module_simplified(
             None,
             decompositions,
             keep_inference_input_mutations,
-            boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
@@ -1336,7 +1333,6 @@ def aot_export_joint_with_descriptors(
         # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
-        None,
         ignore_shape_env,
         flatten=True,
         # Without this, we will attempt to "compile" the backward lazily
