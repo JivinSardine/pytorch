@@ -1348,6 +1348,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
+    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self
+
     @staticmethod
     @functools.cache
     def _supported_random_functions() -> set[Any]:
@@ -2806,6 +2809,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                     raise
         return super().call_method(tx, name, args, kwargs)
 
+    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self._dict_vt.iter_impl(tx)
+
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         if type(self.value).__iter__ in (  # type: ignore[attr-defined]
             dict.__iter__,
@@ -2893,6 +2899,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def as_python_constant(self) -> object:
         return self._set_vt.as_python_constant()
 
+    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self._set_vt.iter_impl(tx)
+
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         if inspect.getattr_static(self.value, "__iter__") in (
             set.__iter__,
@@ -2969,11 +2978,16 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
             return self._list_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
+    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        assert self._list_vt is not None
+        return self._list_vt.iter_impl(tx)
+
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         assert self._list_vt is not None
         if type(self.value).__iter__ is list.__iter__:  # type: ignore[attr-defined]
             return self._list_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+        # return super().unpack_var_sequence(tx)
 
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
         return side_effects.is_modified(self._list_vt)
@@ -3052,6 +3066,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if method in tuple_methods:
             return self._tuple_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        assert self._tuple_vt is not None
+        return self._tuple_vt.iter_impl(tx)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         assert self._tuple_vt is not None
