@@ -74,7 +74,6 @@ from ..source import (
 )
 from ..utils import (
     check_constant_args,
-    cmp_name_to_op_mapping,
     dict_methods,
     enum_type_methods,
     frozenset_methods,
@@ -91,6 +90,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     raise_on_overridden_hash,
+    richcmp_op,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
@@ -104,6 +104,7 @@ from .base import (
     VariableTracker,
 )
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
+from .object_protocol import is_richcompare_not_implemented
 
 
 try:
@@ -339,7 +340,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(obj):
             return super().var_getattr(tx, name)
 
-        if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
+        if name in richcmp_op and not isinstance(obj, types.FunctionType):
             return variables.GetAttrVariable(self, name, None, source=source)
 
         if isinstance(obj, staticmethod):
@@ -1055,6 +1056,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        from .object_protocol import object_richcompare
+
+        # CPython: PyType_Type doesn't set tp_richcompare, inherits
+        # object_richcompare (identity-based).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c (PyType_Type)
+        return object_richcompare(self, tx, other, op)
+
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
@@ -1260,6 +1274,63 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        # If the type defines a pure-Python comparison method, trace into it
+        method = getattr(type(self.value), op)
+        if hasattr(method, "__code__"):
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, method).call_function(
+                tx, [self, other], {}
+            )
+
+        if op == "__ne__" and method is object.__ne__:
+            # Default object.__ne__ delegates to __eq__ then negates
+            eq_method = type(self.value).__eq__
+            if hasattr(eq_method, "__code__"):
+                from .builder import SourcelessBuilder
+
+                result = SourcelessBuilder.create(tx, eq_method).call_function(
+                    tx, [self, other], {}
+                )
+                if is_richcompare_not_implemented(result):
+                    return result
+                if result.is_python_constant():
+                    return variables.ConstantVariable.create(
+                        not result.as_python_constant()
+                    )
+
+        # No pure-Python comparison method — inherits object_richcompare
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
+    def richcompare_with_inner_vt(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+        base_type: type,
+        inner_vt: "VariableTracker",
+        other_inner_vt: "VariableTracker",
+    ) -> "VariableTracker":
+        """Shared richcompare logic for UserDefined{Dict,Set,List}Variable.
+
+        If the user's subclass overrides the base type's comparison with a
+        pure-Python method, trace into it via the base class. Otherwise
+        delegate to the inner VT that models the base container.
+        """
+        method = getattr(type(self.value), op, None)
+        base_method = getattr(base_type, op, None)
+        if method is not base_method and hasattr(method, "__code__"):
+            return UserDefinedObjectVariable.richcompare_impl(self, tx, other, op)
+        return inner_vt.richcompare_impl(tx, other_inner_vt, op)
 
     def as_python_constant(self) -> object:
         if self.is_pytree_constant_class and self.source:
@@ -2800,6 +2871,19 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._dict_vt.install_dict_contains_guard(tx, args)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        other_inner = (
+            other._dict_vt if isinstance(other, UserDefinedDictVariable) else other
+        )
+        return self.richcompare_with_inner_vt(
+            tx, other, op, dict, self._dict_vt, other_inner
+        )
+
     def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
@@ -2899,6 +2983,20 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             other, UserDefinedSetVariable
         ) and self._set_vt.is_python_equal(other._set_vt)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        base_type = set if isinstance(self.value, set) else frozenset
+        other_inner = (
+            other._set_vt if isinstance(other, UserDefinedSetVariable) else other
+        )
+        return self.richcompare_with_inner_vt(
+            tx, other, op, base_type, self._set_vt, other_inner
+        )
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -2948,6 +3046,19 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        other_inner = (
+            other._list_vt if isinstance(other, UserDefinedListVariable) else other
+        )
+        return self.richcompare_with_inner_vt(
+            tx, other, op, list, self._list_vt, other_inner
+        )
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -3007,18 +3118,33 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         assert self._tuple_vt is not None
-        if name == "__eq__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return VariableTracker.build(tx, self.is_python_equal(args[0]))
-        elif name == "__ne__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return VariableTracker.build(tx, not self.is_python_equal(args[0]))
         method = self._maybe_get_baseclass_method(name)
         if method in tuple_methods:
             return self._tuple_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        # CPython: tuple_richcompare in Objects/tupleobject.c
+        # https://github.com/python/cpython/blob/main/Objects/tupleobject.c
+        assert self._tuple_vt is not None
+        if op in ("__eq__", "__ne__"):
+            # polyfills.list_cmp does `if a != b` per element, which causes
+            # data-dependent branching when elements are TensorVariables.
+            # is_python_equal uses VT/fake-tensor identity for tensors
+            # (same VT → same tensor → equal) and value comparison for constants,
+            # avoiding the branch. This matches what CPython does for identity
+            # (PyObject_RichCompareBool checks `v == w` before calling __eq__).
+            result = self.is_python_equal(other)
+            return VariableTracker.build(tx, result if op == "__eq__" else not result)
+        other_vt = (
+            other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
+        )  # type: ignore[attr-defined]
+        return self._tuple_vt.richcompare_impl(tx, other_vt, op)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         assert self._tuple_vt is not None
