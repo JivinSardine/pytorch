@@ -133,10 +133,11 @@ runs:
       run: |
         # Limit uv parallelism to avoid OOM on memory-constrained pods where
         # uv defaults to the host CPU count (e.g., 192) instead of the pod limit.
+        export MAX_JOBS=$(nproc)
         export UV_CONCURRENT_BUILDS=$(nproc)
-        export UV_CONCURRENT_INSTALLS=$(nproc)
-        # Observe this command OOM on 3.14t
-        PYTHON_GIL=1 uv pip install -r .ci/docker/requirements-ci.txt
+        export UV_CONCURRENT_INSTALLS=$(nproc)        
+        
+        uv pip install -r .ci/docker/requirements-ci.txt
         echo "CMAKE_PREFIX_PATH=${VIRTUAL_ENV}" >> "${GITHUB_ENV}"
 
     - name: Activate C++ compiler
