@@ -1044,7 +1044,8 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp)
+      .def_readwrite("profilingName", &::c10d::AllreduceOptions::profilingName);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
@@ -1064,7 +1065,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp)
+      .def_readwrite("profilingName", &::c10d::AllgatherOptions::profilingName);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -1082,7 +1084,9 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp)
+      .def_readwrite(
+          "profilingName", &::c10d::ReduceScatterOptions::profilingName);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
