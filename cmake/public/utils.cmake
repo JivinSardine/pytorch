@@ -360,7 +360,7 @@ function(torch_compile_options libname)
     # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
     # This option is available since VS 2017.
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
+    target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
